@@ -17,6 +17,9 @@ LINE_PUSH_URL = "https://api.line.me/v2/bot/message/push"
 LINE_REPLY_URL = "https://api.line.me/v2/bot/message/reply"
 SHEET_ID = os.environ.get("GOOGLE_SHEET_ID")
 
+# ---------- トレーナーID ----------
+TRAINER_IDS = ["Uf3f9b02171a5548eb9ff140738ac2255"]
+
 # ---------- セッション一時保存（メモリ内） ----------
 sessions = {}
 
@@ -402,6 +405,47 @@ def get_client_info(client_name):
         print(f"[クライアント情報取得エラー] {e}", flush=True)
         return None
 
+# ========== リッチメニュー制御 ==========
+def link_richmenu_to_user(user_id):
+    """デフォルトリッチメニューを取得してユーザーにリンク"""
+    headers = {"Authorization": f"Bearer {LINE_TOKEN}"}
+    # デフォルトリッチメニューIDを取得
+    res = requests.get(f"https://api.line.me/v2/bot/user/all/richmenu", headers=headers)
+    if res.status_code == 200:
+        richmenu_id = res.json().get("richMenuId")
+        if richmenu_id:
+            # デフォルトを解除
+            requests.delete(f"https://api.line.me/v2/bot/user/all/richmenu", headers=headers)
+            # トレーナーに個別リンク
+            requests.post(
+                f"https://api.line.me/v2/bot/user/{user_id}/richmenu/{richmenu_id}",
+                headers=headers
+            )
+            print(f"[RICHMENU] Linked {richmenu_id} to {user_id}", flush=True)
+            return True
+    return False
+
+def setup_trainer_richmenu():
+    """起動時にデフォルトリッチメニューをトレーナーだけにリンク"""
+    headers = {"Authorization": f"Bearer {LINE_TOKEN}"}
+    # デフォルトリッチメニューがあれば取得
+    res = requests.get(f"https://api.line.me/v2/bot/user/all/richmenu", headers=headers)
+    if res.status_code == 200:
+        richmenu_id = res.json().get("richMenuId")
+        if richmenu_id:
+            # デフォルトを解除
+            requests.delete(f"https://api.line.me/v2/bot/user/all/richmenu", headers=headers)
+            # 各トレーナーに個別リンク
+            for tid in TRAINER_IDS:
+                requests.post(
+                    f"https://api.line.me/v2/bot/user/{tid}/richmenu/{richmenu_id}",
+                    headers=headers
+                )
+                print(f"[STARTUP] Richmenu linked to trainer {tid}", flush=True)
+
+# 起動時に実行
+setup_trainer_richmenu()
+
 # ========== Health Check ==========
 @app.route("/health", methods=["GET"])
 def health():
@@ -428,7 +472,15 @@ def webhook():
         print(f"[EVENT] type={event_type} user={user_id}", flush=True)
 
         try:
-            if event_type == "message":
+            if event_type == "follow":
+                # 友だち追加時: トレーナーにだけリッチメニューをリンク
+                if user_id in TRAINER_IDS:
+                    link_richmenu_to_user(user_id)
+                    print(f"[FOLLOW] Trainer {user_id} - richmenu linked", flush=True)
+                else:
+                    print(f"[FOLLOW] Client {user_id} - no richmenu", flush=True)
+
+            elif event_type == "message":
                 msg = event.get("message", {})
                 msg_type = msg.get("type")
                 print(f"[MESSAGE] type={msg_type}", flush=True)
