@@ -651,8 +651,10 @@ def handle_record_select(user_id, reply_token):
         else:
             reply_message(reply_token, [{"type": "text", "text": "クライアントマスターにデータがありません。"}])
     except Exception as e:
-        print(f"[記録選択エラー] {e}", flush=True)
-        reply_message(reply_token, [{"type": "text", "text": "データ取得中にエラーが発生しました。"}])
+        import traceback
+        print(f"[記録選択エラー] {type(e).__name__}: {e}", flush=True)
+        traceback.print_exc()
+        reply_message(reply_token, [{"type": "text", "text": f"エラー: {type(e).__name__}: {e}"}])
 
 # ========== /送信: 未送信レコード一覧 ==========
 def handle_send_list(user_id, reply_token):
