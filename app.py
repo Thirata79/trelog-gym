@@ -402,6 +402,19 @@ def get_client_info(client_name):
         print(f"[クライアント情報取得エラー] {e}", flush=True)
         return None
 
+# ========== Health Check ==========
+@app.route("/health", methods=["GET"])
+def health():
+    creds = os.environ.get("GOOGLE_CREDENTIALS", "")
+    return jsonify({
+        "status": "ok",
+        "google_credentials_length": len(creds),
+        "google_credentials_start": creds[:20] if creds else "EMPTY",
+        "google_sheet_id": SHEET_ID[:10] + "..." if SHEET_ID else "NOT SET",
+        "line_token_set": bool(LINE_TOKEN),
+        "openai_key_set": bool(os.environ.get("OPENAI_API_KEY")),
+    })
+
 # ========== Webhook ==========
 @app.route("/webhook", methods=["POST"])
 def webhook():
