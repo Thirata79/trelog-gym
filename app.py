@@ -680,6 +680,10 @@ def handle_text(user_id, reply_token, text):
     elif cmd in ["/プログラム", "プログラム"]:
         handle_program_select(reply_token)
 
+    # /履歴 → クライアント別の種目履歴
+    elif cmd in ["/履歴", "履歴"]:
+        handle_history_select(user_id, reply_token)
+
     elif len(cmd) > 5:
         # 記録待ちのクライアントがいればそのクライアント名付きで解析
         selected_client = recording_for.get(user_id, "")
@@ -917,6 +921,103 @@ def handle_report(reply_token):
         print(f"[レポートエラー] {e}", flush=True)
         reply_message(reply_token, [{"type": "text", "text": "データ取得中にエラーが発生しました。"}])
 
+# ========== /履歴: クライアント選択 ==========
+def handle_history_select(user_id, reply_token):
+    try:
+        client = get_sheets_client()
+        sheet = client.open_by_key(SHEET_ID).worksheet("クライアントマスター")
+        rows = sheet.get_all_values()
+
+        items = []
+        for row in rows[2:]:
+            name = row[1] if len(row) > 1 else ""
+            if name:
+                items.append({
+                    "type": "action",
+                    "action": {
+                        "type": "postback",
+                        "label": name[:20],
+                        "data": f"action=history_for&client={name}"
+                    }
+                })
+
+        if items:
+            reply_message(reply_token, [{
+                "type": "text",
+                "text": "誰の種目別履歴を確認しますか？",
+                "quickReply": {"items": items[:13]}
+            }])
+        else:
+            reply_message(reply_token, [{"type": "text", "text": "クライアントマスターにデータがありません。"}])
+    except Exception as e:
+        print(f"[履歴選択エラー] {e}", flush=True)
+        reply_message(reply_token, [{"type": "text", "text": "データ取得中にエラーが発生しました。"}])
+
+# ========== /履歴: 種目別サマリー表示 ==========
+def handle_history_view(user_id, reply_token, client_name):
+    try:
+        client = get_sheets_client()
+        workbook = client.open_by_key(SHEET_ID)
+
+        try:
+            ex_sheet = workbook.worksheet("種目別ログ")
+        except gspread.exceptions.WorksheetNotFound:
+            reply_message(reply_token, [{"type": "text", "text": "種目別ログがまだありません。セッションを記録すると自動作成されます。"}])
+            return
+
+        rows = ex_sheet.get_all_values()
+
+        # クライアント名でフィルタして種目ごとにまとめる
+        exercises = {}
+        for row in rows[1:]:
+            if len(row) >= 6 and row[1] == client_name:
+                date = row[0][:10]  # 日付部分のみ
+                name = row[2]
+                weight = row[3]
+                sets = row[4]
+                reps = row[5]
+                note = row[6] if len(row) > 6 else ""
+
+                if name not in exercises:
+                    exercises[name] = []
+                entry = f"  {date}: "
+                parts = []
+                if weight:
+                    parts.append(weight)
+                if sets and reps:
+                    parts.append(f"{sets}x{reps}")
+                elif sets:
+                    parts.append(f"{sets}セット")
+                elif reps:
+                    parts.append(f"{reps}レップ")
+                entry += " ".join(parts) if parts else "記録あり"
+                if note:
+                    entry += f" ({note})"
+                exercises[name].append(entry)
+
+        if not exercises:
+            reply_message(reply_token, [{"type": "text", "text": f"{client_name}さんの種目別履歴はまだありません。"}])
+            return
+
+        # 種目別にフォーマット
+        lines = [f"📋 {client_name}さんの種目別履歴\n"]
+        for ex_name, records in exercises.items():
+            lines.append(f"▸ {ex_name}")
+            for r in records[-5:]:  # 直近5回分まで
+                lines.append(r)
+            lines.append("")
+
+        text = "\n".join(lines)
+        # LINEメッセージは5000文字まで
+        if len(text) > 4900:
+            text = text[:4900] + "\n...（一部省略）"
+
+        reply_message(reply_token, [{"type": "text", "text": text}])
+
+    except Exception as e:
+        print(f"[履歴表示エラー] {e}", flush=True)
+        reply_message(reply_token, [{"type": "text", "text": "履歴取得中にエラーが発生しました。"}])
+
 # ========== /体組成: クライアント選択 ==========
 def handle_body_comp_select(user_id, reply_token):
     try:
@@ -1089,6 +1190,11 @@ def handle_postback(user_id, reply_token, data):
             reply_message(reply_token, [{"type": "text", "text": "クライアント名が取得できませんでした。"}])
 
     # ---------- 体組成記録（クライアント選択後） ----------
+    # ---------- 履歴確認 ----------
+    elif action == "history_for":
+        client_name = params.get("client", "")
+        handle_history_view(user_id, reply_token, client_name)
+
     elif action == "bodycomp_for":
         client_name = params.get("client", "")
         recording_for[user_id] = f"__bodycomp__{client_name}"
@@ -1355,20 +1461,47 @@ def handle_program_generate(reply_token, client_name):
 # ========== Google Sheets書き込み ==========
 def write_to_sheets(session):
     gc = get_sheets_client()
-    sheet = gc.open_by_key(SHEET_ID).worksheet("セッションログ")
+    workbook = gc.open_by_key(SHEET_ID)
+    sheet = workbook.worksheet("セッションログ")
     all_rows = sheet.get_all_values()
     no = len(all_rows) - 1
+    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    client_name = session.get("clientName", "")
+    exercises = session.get("exercises", [])
+    exercises_json = json.dumps(exercises, ensure_ascii=False) if exercises else ""
 
     sheet.append_row([
+        now,
         no,
-        datetime.now().strftime("%Y-%m-%d"),
-        session.get("clientName", ""),
+        client_name,
         session.get("menu", ""),
         session.get("memo", ""),
-        "",  # トレーナー所見
-        session.get("next", ""),
+        exercises_json,
         "未送信"
     ])
+
+    # 種目別ログに個別書き込み
+    if exercises:
+        try:
+            ex_sheet = workbook.worksheet("種目別ログ")
+        except gspread.exceptions.WorksheetNotFound:
+            ex_sheet = workbook.add_worksheet(title="種目別ログ", rows=1000, cols=8)
+            ex_sheet.append_row(["日時", "クライアント名", "種目名", "重量", "セット", "レップ", "備考", "セッションNo"])
+
+        ex_rows = []
+        for ex in exercises:
+            ex_rows.append([
+                now,
+                client_name,
+                ex.get("name", ""),
+                str(ex.get("weight", "")) if ex.get("weight") else "",
+                str(ex.get("sets", "")) if ex.get("sets") else "",
+                str(ex.get("reps", "")) if ex.get("reps") else "",
+                ex.get("note", ""),
+                no
+            ])
+        if ex_rows:
+            ex_sheet.append_rows(ex_rows)
 
 # ========== 名前で最新の未送信レコードを送信済みに更新 ==========
 def update_send_status_by_name(client_name):
