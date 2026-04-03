@@ -542,6 +542,22 @@ def handle_audio(user_id, reply_token, message_id):
     selected_client = recording_for.get(user_id, "")
     parse_and_confirm(user_id, reply_token, transcript.text, selected_client)
 
+# ========== クライアントの言語設定を取得 ==========
+def get_client_lang(client_name):
+    """クライアントマスターのI列(言語)を取得。未設定ならJA"""
+    try:
+        gc = get_sheets_client()
+        sheet = gc.open_by_key(SHEET_ID).worksheet("クライアントマスター")
+        rows = sheet.get_all_values()
+        for row in rows[1:]:
+            name = row[1] if len(row) > 1 else ""
+            if name == client_name:
+                lang = row[8] if len(row) > 8 else ""
+                return lang.upper().strip() if lang else "JA"
+        return "JA"
+    except Exception:
+        return "JA"
+
 # ========== 音声認識の誤変換を直接テキスト置換 ==========
 VOICE_FIX = {
     "ラウンジ": "ランジ",
@@ -587,6 +603,10 @@ def parse_and_confirm(user_id, reply_token, text, selected_client=""):
     text = fix_voice_text(text)
     if text != original_text:
         print(f"[VOICE FIX] {original_text} → {text}", flush=True)
+
+    # クライアントの言語設定を取得
+    client_lang = get_client_lang(selected_client) if selected_client else "JA"
+
     # 用語リスト（スペル補正用のみ）
     exercise_hint = ""
     try:
@@ -603,7 +623,14 @@ def parse_and_confirm(user_id, reply_token, text, selected_client=""):
                 "role": "system",
                 "content": (
                     "You are a helpful assistant that extracts structured training session notes from a Japanese gym/fitness trainer. "
-                    "Always respond with valid JSON only, no markdown, no explanation.\n\n"
+                    "The trainer may input in Japanese, English, or mixed. "
+                    + (
+                        "OUTPUT LANGUAGE: ENGLISH. Translate all Japanese input to English. "
+                        "Exercise names, Memo, and Next must ALL be in English. "
+                        if client_lang == "EN" else
+                        "OUTPUT LANGUAGE: JAPANESE. "
+                    )
+                    + "Always respond with valid JSON only, no markdown, no explanation.\n\n"
                     "FORMAT:\n"
                     "{\n"
                     '  "Client name": "name",\n'
@@ -642,8 +669,13 @@ def parse_and_confirm(user_id, reply_token, text, selected_client=""):
                     "- IMPORTANT: Include ALL exercises mentioned, even bodyweight exercises, stretches, mobility work.\n"
                     "  Do NOT omit exercises just because they lack sets/reps/weight.\n"
                     "- Preserve the trainer's EXACT observations in Memo. Do NOT simplify or shorten.\n"
-                    "- Exercise names: use Japanese (カタカナ) for the name field.\n"
-                    "- The spelling reference below is ONLY for correcting misspellings. Do NOT use it to add exercises."
+                    + (
+                        "- Exercise names: use ENGLISH for the name field.\n"
+                        "- Memo and Next: write in ENGLISH.\n"
+                        if client_lang == "EN" else
+                        "- Exercise names: use Japanese (カタカナ) for the name field.\n"
+                    )
+                    + "- The spelling reference below is ONLY for correcting misspellings. Do NOT use it to add exercises."
                     + exercise_hint
                 )
             },
@@ -1185,13 +1217,24 @@ def handle_postback(user_id, reply_token, data):
         client_line_id = get_client_line_id(client_name)
 
         if client_line_id:
-            push_message(client_line_id, [{"type": "text", "text": (
-                f"【トレーニング記録】\n"
-                f"メニュー：{session.get('menu', '')}\n"
-                f"メモ：{session.get('memo', '')}\n"
-                f"次回：{session.get('next', '')}\n\n"
-                f"お疲れ様でした！"
-            )}])
+            lang = get_client_lang(client_name)
+            if lang == "EN":
+                msg_text = (
+                    f"【Training Record】\n"
+                    f"Menu: {session.get('menu', '')}\n"
+                    f"Notes: {session.get('memo', '')}\n"
+                    f"Next: {session.get('next', '')}\n\n"
+                    f"Great work today!"
+                )
+            else:
+                msg_text = (
+                    f"【トレーニング記録】\n"
+                    f"メニュー：{session.get('menu', '')}\n"
+                    f"メモ：{session.get('memo', '')}\n"
+                    f"次回：{session.get('next', '')}\n\n"
+                    f"お疲れ様でした！"
+                )
+            push_message(client_line_id, [{"type": "text", "text": msg_text}])
             try:
                 update_send_status_by_name(client_name)
             except Exception as e:
