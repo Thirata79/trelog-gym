@@ -963,24 +963,25 @@ def handle_history_view(user_id, reply_token, client_name):
         client = get_sheets_client()
         workbook = client.open_by_key(SHEET_ID)
 
+        sheet_name = f"種目_{client_name}"
         try:
-            ex_sheet = workbook.worksheet("種目別ログ")
+            ex_sheet = workbook.worksheet(sheet_name)
         except gspread.exceptions.WorksheetNotFound:
-            reply_message(reply_token, [{"type": "text", "text": "種目別ログがまだありません。セッションを記録すると自動作成されます。"}])
+            reply_message(reply_token, [{"type": "text", "text": f"{client_name}さんの種目別履歴はまだありません。セッションを記録すると自動作成されます。"}])
             return
 
         rows = ex_sheet.get_all_values()
 
-        # クライアント名でフィルタして種目ごとにまとめる
+        # 種目ごとにまとめる
         exercises = {}
         for row in rows[1:]:
-            if len(row) >= 6 and row[1] == client_name:
-                date = row[0][:10]  # 日付部分のみ
-                name = row[2]
-                weight = row[3]
-                sets = row[4]
-                reps = row[5]
-                note = row[6] if len(row) > 6 else ""
+            if len(row) >= 5:
+                date = row[0][:10]
+                name = row[1]
+                weight = row[2]
+                sets = row[3]
+                reps = row[4]
+                note = row[5] if len(row) > 5 else ""
 
                 if name not in exercises:
                     exercises[name] = []
@@ -1484,19 +1485,19 @@ def write_to_sheets(session):
         "未送信"
     ])
 
-    # 種目別ログに個別書き込み
-    if exercises:
+    # クライアント別の種目別ログシートに書き込み
+    if exercises and client_name:
+        sheet_name = f"種目_{client_name}"
         try:
-            ex_sheet = workbook.worksheet("種目別ログ")
+            ex_sheet = workbook.worksheet(sheet_name)
         except gspread.exceptions.WorksheetNotFound:
-            ex_sheet = workbook.add_worksheet(title="種目別ログ", rows=1000, cols=8)
-            ex_sheet.append_row(["日時", "クライアント名", "種目名", "重量", "セット", "レップ", "備考", "セッションNo"])
+            ex_sheet = workbook.add_worksheet(title=sheet_name, rows=1000, cols=7)
+            ex_sheet.append_row(["日時", "種目名", "重量", "セット", "レップ", "備考", "セッションNo"])
 
         ex_rows = []
         for ex in exercises:
             ex_rows.append([
                 now,
-                client_name,
                 ex.get("name", ""),
                 str(ex.get("weight", "")) if ex.get("weight") else "",
                 str(ex.get("sets", "")) if ex.get("sets") else "",
