@@ -479,8 +479,14 @@ def webhook():
                     print(f"[FOLLOW] Trainer {user_id} - richmenu linked", flush=True)
                 else:
                     print(f"[FOLLOW] Client {user_id} - no richmenu", flush=True)
+                continue
 
-            elif event_type == "message":
+            # トレーナー以外のメッセージは無視
+            if user_id not in TRAINER_IDS:
+                print(f"[SKIP] Non-trainer message from {user_id}", flush=True)
+                continue
+
+            if event_type == "message":
                 msg = event.get("message", {})
                 msg_type = msg.get("type")
                 print(f"[MESSAGE] type={msg_type}", flush=True)
