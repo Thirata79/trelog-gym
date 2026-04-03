@@ -539,8 +539,48 @@ def handle_audio(user_id, reply_token, message_id):
     selected_client = recording_for.get(user_id, "")
     parse_and_confirm(user_id, reply_token, transcript.text, selected_client)
 
+# ========== 音声認識の誤変換を直接テキスト置換 ==========
+VOICE_FIX = {
+    "ラウンジ": "ランジ",
+    "内線": "内旋",
+    "外線": "外旋",
+    "凱旋": "外旋",
+    "回線": "回旋",
+    "内戦": "内旋",
+    "過信": "外旋",
+    "内心": "内旋",
+    "外心": "外旋",
+    "関節法": "関節包",
+    "関節砲": "関節包",
+    "大腿師頭": "大腿四頭",
+    "大体四頭": "大腿四頭",
+    "大体師頭": "大腿四頭",
+    "光背筋": "広背筋",
+    "高配筋": "広背筋",
+    "三頭金": "三頭筋",
+    "二頭金": "二頭筋",
+    "サンセット": "3セット",
+    "ゴセット": "5セット",
+    "ゴキロ": "5kg",
+    "中回": "10回",
+    "デットリフト": "デッドリフト",
+    "スクワッド": "スクワット",
+    "ラットプル": "ラットプルダウン",
+    "ハムスト": "ハムストリング",
+    "ローテーターカフス": "ローテーターカフ",
+    "権限": "肩甲",
+    "腱板": "腱板",
+}
+
+def fix_voice_text(text):
+    for wrong, correct in VOICE_FIX.items():
+        text = text.replace(wrong, correct)
+    return text
+
 # ========== GPT解析＋確認（音声・テキスト共通） ==========
 def parse_and_confirm(user_id, reply_token, text, selected_client=""):
+    # 音声認識の誤変換をPythonで直接修正
+    text = fix_voice_text(text)
     # 用語リスト（スペル補正用のみ）
     exercise_hint = ""
     try:
