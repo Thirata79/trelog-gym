@@ -696,7 +696,7 @@ def parse_and_confirm(user_id, reply_token, text, selected_client=""):
     is_en = client_lang == "EN"
     menu_lines = []
     for ex in exercises:
-        line = ex.get("name", "")
+        line = "▪ " + ex.get("name", "")
         parts = []
         if ex.get("weight"):
             parts.append(str(ex["weight"]))
@@ -707,9 +707,9 @@ def parse_and_confirm(user_id, reply_token, text, selected_client=""):
         elif ex.get("reps"):
             parts.append(f"{ex['reps']} reps" if is_en else f"{ex['reps']}レップ")
         if parts:
-            line += " " + " ".join(parts)
+            line += "\n   " + " | ".join(parts)
         if ex.get("note"):
-            line += f" ({ex['note']})"
+            line += f"\n   ({ex['note']})"
         menu_lines.append(line)
 
     menu = "\n".join(menu_lines) if menu_lines else data.get("Menu", "")
@@ -1232,21 +1232,28 @@ def handle_postback(user_id, reply_token, data):
 
         if client_line_id:
             lang = get_client_lang(client_name)
+            menu = session.get('menu', '')
+            memo = session.get('memo', '')
+            next_s = session.get('next', '')
             if lang == "EN":
                 msg_text = (
-                    f"【Training Record】\n"
-                    f"Menu: {session.get('menu', '')}\n"
-                    f"Notes: {session.get('memo', '')}\n"
-                    f"Next: {session.get('next', '')}\n\n"
-                    f"Great work today!"
+                    f"━━━━━━━━━━━━━━\n"
+                    f"  Training Record\n"
+                    f"━━━━━━━━━━━━━━\n\n"
+                    f"{menu}\n\n"
+                    + (f"📝 Notes:\n{memo}\n\n" if memo else "")
+                    + (f"📌 Next Session:\n{next_s}\n\n" if next_s else "")
+                    + f"Great work today! 💪"
                 )
             else:
                 msg_text = (
-                    f"【トレーニング記録】\n"
-                    f"メニュー：{session.get('menu', '')}\n"
-                    f"メモ：{session.get('memo', '')}\n"
-                    f"次回：{session.get('next', '')}\n\n"
-                    f"お疲れ様でした！"
+                    f"━━━━━━━━━━━━━━\n"
+                    f"  トレーニング記録\n"
+                    f"━━━━━━━━━━━━━━\n\n"
+                    f"{menu}\n\n"
+                    + (f"📝 メモ:\n{memo}\n\n" if memo else "")
+                    + (f"📌 次回:\n{next_s}\n\n" if next_s else "")
+                    + f"お疲れ様でした！💪"
                 )
             push_message(client_line_id, [{"type": "text", "text": msg_text}])
             try:
