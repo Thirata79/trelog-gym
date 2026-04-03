@@ -693,6 +693,7 @@ def parse_and_confirm(user_id, reply_token, text, selected_client=""):
     next_session = data.get("Next", "")
 
     # エクササイズリストを読みやすい文字列にフォーマット
+    is_en = client_lang == "EN"
     menu_lines = []
     for ex in exercises:
         line = ex.get("name", "")
@@ -702,9 +703,9 @@ def parse_and_confirm(user_id, reply_token, text, selected_client=""):
         if ex.get("sets") and ex.get("reps"):
             parts.append(f"{ex['sets']}x{ex['reps']}")
         elif ex.get("sets"):
-            parts.append(f"{ex['sets']}セット")
+            parts.append(f"{ex['sets']} sets" if is_en else f"{ex['sets']}セット")
         elif ex.get("reps"):
-            parts.append(f"{ex['reps']}レップ")
+            parts.append(f"{ex['reps']} reps" if is_en else f"{ex['reps']}レップ")
         if parts:
             line += " " + " ".join(parts)
         if ex.get("note"):
@@ -716,24 +717,37 @@ def parse_and_confirm(user_id, reply_token, text, selected_client=""):
     sessions[user_id] = {
         "clientName": client_name,
         "menu": menu,
-        "exercises": exercises,  # 構造化データも保持
+        "exercises": exercises,
         "memo": memo,
-        "next": next_session
+        "next": next_session,
+        "lang": client_lang
     }
 
     # 記録待ち状態をクリア
     recording_for.pop(user_id, None)
 
-    reply_message(reply_token, [{
-        "type": "text",
-        "text": (
+    if is_en:
+        confirm_text = (
+            f"Parsed session:\n\n"
+            f"Client: {client_name or '(unknown)'}\n"
+            f"Menu:\n{menu}\n\n"
+            f"Notes: {memo}\n"
+            f"Next: {next_session}\n\n"
+            "Save this record?"
+        )
+    else:
+        confirm_text = (
             f"以下の内容で解析しました\n\n"
             f"クライアント：{client_name or '（未確認）'}\n"
             f"メニュー：\n{menu}\n\n"
             f"メモ：{memo}\n"
             f"次回：{next_session}\n\n"
             "この内容で記録しますか？"
-        ),
+        )
+
+    reply_message(reply_token, [{
+        "type": "text",
+        "text": confirm_text,
         "quickReply": {"items": [
             {"type": "action", "action": {"type": "postback", "label": "記録する", "data": "action=記録"}},
             {"type": "action", "action": {"type": "postback", "label": "やり直す", "data": "action=retry"}}
