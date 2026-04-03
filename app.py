@@ -535,6 +535,9 @@ def handle_audio(user_id, reply_token, message_id):
             prompt=whisper_prompt
         )
 
+    # Whisperの変換結果をログに出力
+    print(f"[WHISPER RAW] {transcript.text}", flush=True)
+
     # 事前にクライアントが選択されていればその名前を渡す
     selected_client = recording_for.get(user_id, "")
     parse_and_confirm(user_id, reply_token, transcript.text, selected_client)
@@ -580,7 +583,10 @@ def fix_voice_text(text):
 # ========== GPT解析＋確認（音声・テキスト共通） ==========
 def parse_and_confirm(user_id, reply_token, text, selected_client=""):
     # 音声認識の誤変換をPythonで直接修正
+    original_text = text
     text = fix_voice_text(text)
+    if text != original_text:
+        print(f"[VOICE FIX] {original_text} → {text}", flush=True)
     # 用語リスト（スペル補正用のみ）
     exercise_hint = ""
     try:
