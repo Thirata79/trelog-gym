@@ -26,6 +26,9 @@ sessions = {}
 # 記録待ちのクライアント名 { userId: clientName }
 recording_for = {}
 
+# オンボーディング中のユーザー
+onboarding = {}
+
 # ========== LINE送信ヘルパー ==========
 def push_message(to, messages):
     headers = {"Authorization": f"Bearer {LINE_TOKEN}", "Content-Type": "application/json"}
@@ -446,6 +449,104 @@ def setup_trainer_richmenu():
 # 起動時に実行
 setup_trainer_richmenu()
 
+
+# ========== オンボーディング（友だち追加→名前登録） ==========
+def handle_follow(user_id, reply_token):
+    if user_id in TRAINER_IDS:
+        link_richmenu_to_user(user_id)
+        print(f"[FOLLOW] Trainer {user_id} - richmenu linked", flush=True)
+        return
+    if is_registered_client(user_id):
+        reply_message(reply_token, [{"type": "text", "text": (
+            "おかえりなさい！\nセッション記録はトレーナーから送信されます。\n\n"
+            "Welcome back!\nYour session records will be sent by your trainer."
+        )}])
+        print(f"[FOLLOW] Returning client {user_id}", flush=True)
+        return
+    onboarding[user_id] = {"step": "awaiting_lang"}
+    reply_message(reply_token, [{
+        "type": "text",
+        "text": ("Welcome! / ようこそ！\n\nPlease select your language.\n言語を選んでください。"),
+        "quickReply": {"items": [
+            {"type": "action", "action": {"type": "postback", "label": "日本語", "data": "action=onboard_lang&lang=ja"}},
+            {"type": "action", "action": {"type": "postback", "label": "English", "data": "action=onboard_lang&lang=en"}}
+        ]}
+    }])
+    print(f"[FOLLOW] New client {user_id} - onboarding started", flush=True)
+
+
+def handle_onboarding_reply(user_id, reply_token, text):
+    state = onboarding.get(user_id, {})
+    step = state.get("step", "")
+    lang = state.get("lang", "ja")
+    if step == "awaiting_name":
+        name = text.strip()
+        if not name or len(name) > 50:
+            msg = "Please enter your name." if lang == "en" else "お名前を入力してください。"
+            reply_message(reply_token, [{"type": "text", "text": msg}])
+            return
+        success = register_new_client(name, user_id, lang)
+        onboarding.pop(user_id, None)
+        if success:
+            if lang == "en":
+                reply_message(reply_token, [{"type": "text", "text": (
+                    f"Thank you, {name}!\n\nYour registration is complete. "
+                    "Your trainer will send you session records after each training."
+                )}])
+            else:
+                reply_message(reply_token, [{"type": "text", "text": (
+                    f"ありがとうございます、{name}さん！\n\n"
+                    "登録が完了しました。トレーニング後にトレーナーからセッション記録が届きます。"
+                )}])
+            for trainer_id in TRAINER_IDS:
+                push_message(trainer_id, [{"type": "text", "text": (
+                    f"【新規クライアント登録】\n名前: {name}\n"
+                    f"言語: {'English' if lang == 'en' else '日本語'}\n\n"
+                    f"クライアントマスターに自動追加しました。"
+                )}])
+        else:
+            msg = "Registration failed. Please try again later." if lang == "en" else "登録に失敗しました。しばらくしてからもう一度お試しください。"
+            reply_message(reply_token, [{"type": "text", "text": msg}])
+    elif step == "awaiting_lang":
+        if any(w in text.lower() for w in ["english", "en", "eng"]):
+            lang = "en"
+        else:
+            lang = "ja"
+        onboarding[user_id] = {"step": "awaiting_name", "lang": lang}
+        msg = "What is your name?" if lang == "en" else "お名前を教えてください。"
+        reply_message(reply_token, [{"type": "text", "text": msg}])
+
+
+def is_registered_client(line_user_id):
+    try:
+        client = get_sheets_client()
+        sheet = client.open_by_key(SHEET_ID).worksheet("クライアントマスター")
+        rows = sheet.get_all_values()
+        for row in rows[1:]:
+            stored_id = row[2] if len(row) > 2 else ""
+            if stored_id == line_user_id:
+                return True
+        return False
+    except Exception as e:
+        print(f"[登録確認エラー] {e}", flush=True)
+        return False
+
+
+def register_new_client(name, line_user_id, lang="ja"):
+    try:
+        client = get_sheets_client()
+        sheet = client.open_by_key(SHEET_ID).worksheet("クライアントマスター")
+        all_rows = sheet.get_all_values()
+        new_id = len(all_rows)
+        new_row = [new_id, name, line_user_id, "", "", "", "", "", lang.upper(), ""]
+        sheet.append_row(new_row)
+        print(f"[新規登録] {name} (LINE:{line_user_id[:8]}... lang:{lang})", flush=True)
+        return True
+    except Exception as e:
+        print(f"[新規登録エラー] {e}", flush=True)
+        return False
+
+
 # ========== Health Check ==========
 @app.route("/health", methods=["GET"])
 def health():
@@ -473,12 +574,27 @@ def webhook():
 
         try:
             if event_type == "follow":
-                # 友だち追加時: トレーナーにだけリッチメニューをリンク
-                if user_id in TRAINER_IDS:
-                    link_richmenu_to_user(user_id)
-                    print(f"[FOLLOW] Trainer {user_id} - richmenu linked", flush=True)
-                else:
-                    print(f"[FOLLOW] Client {user_id} - no richmenu", flush=True)
+                handle_follow(user_id, reply_token)
+                continue
+
+            # オンボーディング中のユーザーからのメッセージ
+            if user_id in onboarding:
+                if event_type == "message":
+                    msg = event.get("message", {})
+                    if msg.get("type") == "text":
+                        handle_onboarding_reply(user_id, reply_token, msg.get("text", ""))
+                    else:
+                        lang = onboarding[user_id].get("lang", "ja")
+                        msg_text = "Please send your name as text." if lang == "en" else "テキストでお名前を送ってください。"
+                        reply_message(reply_token, [{"type": "text", "text": msg_text}])
+                elif event_type == "postback":
+                    data = event.get("postback", {}).get("data", "")
+                    params = dict(p.split("=", 1) for p in data.split("&") if "=" in p)
+                    if params.get("action") == "onboard_lang":
+                        lang = params.get("lang", "ja")
+                        onboarding[user_id] = {"step": "awaiting_name", "lang": lang}
+                        msg_text = "What is your name?" if lang == "en" else "お名前を教えてください。"
+                        reply_message(reply_token, [{"type": "text", "text": msg_text}])
                 continue
 
             # トレーナー以外のメッセージは無視
